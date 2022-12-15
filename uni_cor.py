@@ -7,7 +7,7 @@ Created on Tue Aug 16 08:05:35 2022
 
 import pandas as pd
 import numpy as np
-
+import time
 
 
 
@@ -91,7 +91,7 @@ def metric(corr_dict):
 
 
 #%%
-def fs(ASV, target_var, taxonomy, threshold = 0.15):
+def fs(ASV, target, tax, threshold = 0.15):
     """
     UniCor algortihm: Takes in a hierarchical continous dataset and propagates significant features (UniCor metric) to higher taxonomic levels in order to preserve crucial information while significantly reducing the feature set in a biologically meaningfull way
 
@@ -99,9 +99,9 @@ def fs(ASV, target_var, taxonomy, threshold = 0.15):
     ----------
     ASV : pd.dataframe
         ASV dataset
-    target_var : pd.dataframe
+    target : pd.dataframe
         continuous target variable
-    taxonomy : pd.dataframe
+    tax : pd.dataframe
         taxonomic hierarchy
     threshold : bool, optional
         UniCor metric threshold. Can only be between 0 and 1. Optimal values depend on the dataset. The default is 0.15.
@@ -109,7 +109,9 @@ def fs(ASV, target_var, taxonomy, threshold = 0.15):
     Raises
     ------
     ValueError
-        Taxonomy is expected to have a clear hierarchy
+        check allowed ranges for the thresholds, dimensions for the dataframes
+    TypeError
+        check types of input
 
     Returns
     -------
@@ -117,80 +119,205 @@ def fs(ASV, target_var, taxonomy, threshold = 0.15):
         returns ASV with changed taxonomic levels, still every level can be accessed and used
 
     """
+    ### check input
+    ###########################################################################
+    #check type
+    if not isinstance(ASV, (pd.DataFrame)):
+        raise TypeError("TypeError exception thrown. Expected pandas dataframe for ASV")
+    if not isinstance(target, (pd.DataFrame)):
+        raise TypeError("TypeError exception thrown. Expected pandas dataframe for target")
+    if not isinstance(tax, (pd.DataFrame, pd.Series)):
+        raise TypeError("TypeError exception thrown. Expected pandas dataframe for tax")
+    if not isinstance(threshold, (float)):
+        raise TypeError("TypeError exception thrown. Expected float for threshold")
+    #check values    
+    if threshold > 1 or threshold < 0:
+        raise ValueError("ValueError exception thrown. threshold is expected to be a float between 0 and 1")
+    #check dimensions
+    if ASV.ndim != 2 or tax.ndim != 2:  
+        raise ValueError("ValueError exception thrown. Expected ASV and tax to have two dimensions")
+    if ASV.shape[0] != tax.shape[0]:
+        raise ValueError("ValueError exception thrown. Expected ASV and tax to have the same number of samples")
+    if ASV.shape[1] != target.shape[0]:
+        raise ValueError("ValueError exception thrown. Expected ASV and target to have the same number of samples")
+    ###########################################################################
     
     
-    #clean zero columns/rows
+    ### clean zero columns/rows (ASVs that are not present in any samples)
+    ###########################################################################
     ASV = ASV.transpose()
     ASV = ASV.loc[:, (ASV != 0).any(axis=0)]
     ASV = ASV.transpose()
-    #get ASV including tax
-    tax_size = taxonomy.columns
-    ASV = ASV.merge(taxonomy, how="left", left_index=True, right_index=True)
-    # get tax levels
-    tax_levels = list(taxonomy.columns)
-    #print(tax_levels)
-    
-    #check sizes
-    size = {}
-    for i in tax_levels:
-        size[i] = len(ASV[i].unique())
-        print(i)
-        print(size[i])
-    
-    
-    
-    ###order & check taxonomic levels
-    #order them correctly if wrong (e.g. unique entries in phylum vs class level )
-    if tax_levels[0] > tax_levels[1]: 
-        tax_levels.reverse()
-    """
-    unique_entries = 1000000    # absurdely high baselevel
-    #check if there is a clear hierarchy
-    for i in tax_levels: #for every level
+    ###########################################################################
         
-        if len(ASV[i].unique()) > unique_entries: #if number of unique values bigger than next higher level
-            raise ValueError("ValueError exception thrown. Taxonomy is expected to have a clear hierarchy (lower number of unique strains in higher taxonomic brackets)")
-        unique_entries = len(ASV[i].unique()) #set current number of unique entries as new max number for the next level
-    """    
-
-    # create empty dictionarys
+        
+    ### check order/hierarchy of taxonomy
+    ###########################################################################
+    tax_levels = list(tax.columns) #get tax level names
+    ASV_tax = ASV.merge(tax, how="left", left_index=True, right_index=True) #merge to compare size
+    size = {} #dict to check sizes
+    last_size = 0 #helper variable to save the last size
+    count = 0 #helper variable
+    
+    for i in tax_levels: #for every taxonomic level
+        print(i)
+        size[i] = len(ASV_tax[i].unique()) #get number of unique entries in that level
+        print(size[i])
+        
+        if size[i] < last_size: #if number of unique entries in current level is smaller than in the last level
+            count += 1 #increase count
+        last_size = size[i] #set current size to future last size
+    
+    #check if hierarchical order is fulfilled
+    if count == len(tax_levels)-1: #check if hierarchical order is ascending from left to right(-1 because first comparison is with count=0)
+        tax_levels.reverse() #if that is the case, reverse the order
+        print("taxonomic order has been reversed") #print a note
+    elif count > 0 and count < len(tax_levels)-1: #if order is not unambiguous: (-1 because first comparison is with count=0)
+        print("Warning: unclear hierarchy as number of unique entries is neither clearly ascending nor descending! The order will be unchanged and used as if descending from left to right") #print a warning
+    ###########################################################################
+    
+    
+    ### bottom up UniCor propagation
+    ###########################################################################
+    # create dictionarys
     ASVdict = {} #for full ASV tables per tax level
     Corr = {} #for full correlation matrix per tax level
-    tax_groups = {} #create tax groups
+    tax_groups = {} #taxonomic groups
     hg = {} #new hierarchy groups
     metrics = {} #UniCor hierarchy groups
-    new_ASV = ASV.copy()
+    new_ASV = ASV_tax.copy() #to keep old and new ASV table distinct
     
+    # propagation level by level
     for j in range(len(tax_levels)-1): #for every taxonomic level
         i = tax_levels[j] #access specific tax level
-        #print(i)
-        #print("-------------")
         x = new_ASV.groupby(i).sum() #accumulate
         x = x.transpose()
-        x = target_var.merge(x, left_index=True, right_index=True) #merge with targetvar
-        ASVdict[i] = x #save in dictionary
+        x = target.merge(x, left_index=True, right_index=True) #merge with target variable
+        ASVdict[i] = x #save ASV in dictionary
         Corr[i] = x.corr() #save correlations in dictionary
-        taxonomy = new_ASV[tax_size]
-        tax_groups[i] = taxonomy[i].unique()
+        taxonomy = new_ASV[tax_levels] #get back the taxonomy
+        tax_groups[i] = taxonomy[i].unique() #get the tax groups of this level
         
         
-        #create hierarchy with selected features
+        # create hierarchy with selected features
         if j <= len(tax_levels)-2: #-1 due to index starting at zero, -1 as we don't need the last computation
-            
             hg[i] = hfsbu(taxonomy, tax_levels[j+1], tax_levels[j], Corr[i]) #get hierarchy groups
             #if nan -> treat as same group and just use next higher tax (no selection/propagation to next level)
             metrics[i] = metric(hg[i]) #get metrics for hierarchy groups
-            #return hg
         
-        
+        # propagate applicable group to next level
         for q in metrics[i]: #for specific strain metric in metrics
             strain_metric = metrics[i][q] #assign strain metric to variable
             if strain_metric > threshold: #check if bigger then defined threshold
-                print(q)
-                #print(strain_metric)
-                #new_ASV[new_ASV[tax_levels[o] == q]] = 
                 new_ASV.loc[new_ASV[i] == q,tax_levels[j+1]] = q #add relevant strain to next higher level
-     
+    ###########################################################################
+    
 
-    return new_ASV
+    return new_ASV #return the adapted asv incuding the taxonomic information
+
+
+
+
+#%%%
+### CBASS84 dataset
+directory = "/Users/JohnDoe/Desktop/data/datasets/"
+#cbass84_meta = pd.read_csv("cbass84_metadata.txt", sep= "[ \t \t]+", error_bad_lines=False) #, usecols=(["Sample", "Site", "Reef", "Species"]))
+cbass84_ASV = pd.read_csv(directory + "cbass84_ASVs.txt", sep= "\s+")
+cbass84_ED50 = pd.read_csv(directory + "cbass84_ED50s.txt", sep= "\s+")
+cbass84_tax = cbass84_ASV.iloc[:, -5:] #get taxonomic information
+cbass84_ASV = cbass84_ASV.iloc[:, :-5] #get rest
+cbass84_ASV = cbass84_ASV.transpose()
+cbass84_ASV = cbass84_ASV.loc[:, (cbass84_ASV != 0).any(axis=0)]
+cbass84_ASV = cbass84_ASV.transpose()
+cbass84_ASV = cbass84_ASV.merge(cbass84_tax, left_index=True, right_index=True)
+cbass84_tax = cbass84_ASV.iloc[:, -5:] #get taxonomic information
+
+#change ASV
+cbass84_ASV_genus = cbass84_ASV.groupby(["Genus"]).sum()
+cbass84_ASV_genus = cbass84_ASV_genus.transpose()
+cbass84_ASV_family = cbass84_ASV.groupby(["Family"]).sum()
+cbass84_ASV_family = cbass84_ASV_family.transpose()
+cbass84_ASV_order = cbass84_ASV.groupby(["Order"]).sum()
+cbass84_ASV_order = cbass84_ASV_order.transpose()
+cbass84_ASV_class = cbass84_ASV.groupby(["Class"]).sum()
+cbass84_ASV_class = cbass84_ASV_class.transpose()
+
+
+#change ED50
+cbass84_ED50["Site"] = None
+cbass84_ED50["Site"][cbass84_ED50["Sample"].str.contains("AF")] = "Al Fahal (AF)"
+cbass84_ED50["Site"][cbass84_ED50["Sample"].str.contains("ExT")] = "Tahala (ExT)"
+cbass84_ED50["Site"][cbass84_ED50["Sample"].str.contains("PrT")] = "Tahala (PrT)"
+cbass84_ED50["Site"][cbass84_ED50["Sample"].str.contains("ICN")] = "Interuniversity Institute for Marine Science (IUI)"
+cbass84_ED50["Species"] = "Stylophora pistillata"
+cbass84_ED50.set_index(["Sample"], inplace = True)
+#specific for correlation analysis:
+cbass84_ED50 = pd.DataFrame(cbass84_ED50["ED50"])
+
+#%%
+
+
+ASV = cbass84_ASV.iloc[:, :-5]
+cbass84_filtered_ASV = fs(ASV, cbass84_ED50, cbass84_tax)
+
+
+
+#change ASV
+cbass84_ASV_genus = cbass84_ASV.groupby(["Genus"]).sum()
+cbass84_ASV_genus = cbass84_ASV_genus.transpose()
+cbass84_ASV_family = cbass84_ASV.groupby(["Family"]).sum()
+cbass84_ASV_family = cbass84_ASV_family.transpose()
+cbass84_ASV_order = cbass84_ASV.groupby(["Order"]).sum()
+cbass84_ASV_order = cbass84_ASV_order.transpose()
+cbass84_ASV_class = cbass84_ASV.groupby(["Class"]).sum()
+cbass84_ASV_class = cbass84_ASV_class.transpose()
+cbass84_ASV_phylum = cbass84_ASV.groupby(["Phylum"]).sum()
+cbass84_ASV_phylum = cbass84_ASV_phylum.transpose()
+
+
+cbass84_ASV_genus_f = cbass84_filtered_ASV.groupby(["Genus"]).sum()
+cbass84_ASV_genus_f = cbass84_ASV_genus_f.transpose()
+cbass84_ASV_family_f = cbass84_filtered_ASV.groupby(["Family"]).sum()
+cbass84_ASV_family_f = cbass84_ASV_family_f.transpose()
+cbass84_ASV_order_f = cbass84_filtered_ASV.groupby(["Order"]).sum()
+cbass84_ASV_order_f = cbass84_ASV_order_f.transpose()
+cbass84_ASV_class_f = cbass84_filtered_ASV.groupby(["Class"]).sum()
+cbass84_ASV_class_f = cbass84_ASV_class_f.transpose()
+cbass84_ASV_phylum_f = cbass84_filtered_ASV.groupby(["Phylum"]).sum()
+cbass84_ASV_phylum_f = cbass84_ASV_phylum_f.transpose()
+
+
+
+#merge
+cbass84_genus = cbass84_ED50.merge(cbass84_ASV_genus, left_index=True, right_index=True)
+cbass84_family = cbass84_ED50.merge(cbass84_ASV_family, left_index=True, right_index=True)
+cbass84_order = cbass84_ED50.merge(cbass84_ASV_order, left_index=True, right_index=True)
+cbass84_class = cbass84_ED50.merge(cbass84_ASV_class, left_index=True, right_index=True)
+cbass84_phylum = cbass84_ED50.merge(cbass84_ASV_phylum, left_index=True, right_index=True)
+
+
+cbass84_genus_f = cbass84_ED50.merge(cbass84_ASV_genus_f, left_index=True, right_index=True)
+cbass84_family_f = cbass84_ED50.merge(cbass84_ASV_family_f, left_index=True, right_index=True)
+cbass84_order_f = cbass84_ED50.merge(cbass84_ASV_order_f, left_index=True, right_index=True)
+cbass84_class_f = cbass84_ED50.merge(cbass84_ASV_class_f, left_index=True, right_index=True)
+cbass84_phylum_f = cbass84_ED50.merge(cbass84_ASV_phylum_f, left_index=True, right_index=True)
+
+
+#%%
+
+import coracle
+
+x = cbass84_phylum.iloc[:,3:]
+y = cbass84_phylum[['ED50']]
+
+start = time.time()
+result_p84 = coracle.coracle(x, y, alpha_l1 = 10**(-2.9), alpha_clr = 10**(-0.4))
+print(time.time()- start)
+
+x_f = cbass84_phylum_f.iloc[:,3:]
+y_f = cbass84_phylum_f[['ED50']]
+
+start = time.time()
+result_p84_f = coracle.coracle(x_f, y_f, alpha_l1 = 10**(-2.9), alpha_clr = 10**(-0.4))
+print(time.time()- start)
 
