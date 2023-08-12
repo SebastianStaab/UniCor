@@ -142,7 +142,7 @@ def uniCor(aSV, target, tax, threshold = 0.15):
     if aSV.ndim != 2 or tax.ndim != 2:  
         raise ValueError("ValueError exception thrown. Expected ASV and tax to have two dimensions")
     if aSV.shape[1] != tax.shape[0]:
-        raise ValueError("ValueError exception thrown. Expected ASV and tax to have the same number of samples")
+        raise ValueError("ValueError exception thrown. Expected ASV and tax to have the same number of features")
     if aSV.shape[0] != target.shape[0]:
         raise ValueError("ValueError exception thrown. Expected ASV and target to have the same number of samples")
     ###########################################################################
