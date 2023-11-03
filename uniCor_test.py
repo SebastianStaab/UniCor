@@ -6,7 +6,7 @@ Created on Wed Mar  1 15:43:34 2023
 """
 
 import pandas as pd
-from uni_cor import uniCor
+from uni_cor import uniCor, unicor_metric
 
 directory = "C:/Users/JohnDoe2Go/Downloads/" #use your path to the variables
 
@@ -19,7 +19,8 @@ y = ASV["ED50"].to_frame()
 x = ASV.iloc[:,3:]
 
 
-result = uniCor(x, y, tax)
+result1 = uniCor(x, y, tax)
+result2 = unicor_metric(x, y)
 #%%
 import unittest
 
@@ -46,6 +47,15 @@ class TestWrongInput(unittest.TestCase):
         self.assertRaises(ValueError, uniCor, x, y, x)
     def test_wrong_dimensions4(self): #tests ValueError is thrown if asv and target don't match in their dimensions (number of samples)
         self.assertRaises(ValueError, uniCor, x, tax, tax)
+        
+    def test_wrong_input_features2(self): #tests if TypeError is thrown if features file is not a pandas dataframe
+        self.assertRaises(TypeError, unicor_metric, 1, y)
+    def test_wrong_input_target2(self): #tests if TypeError is thrown if target file is not a pandas dataframe, or series
+        self.assertRaises(TypeError, unicor_metric, x, 1)
+    def test_wrong_dimensions5(self): #tests ValueError is thrown if features and target don't match in their dimensions (number of samples)
+        self.assertRaises(ValueError, unicor_metric, y, tax)
+    def test_wrong_dimensions6(self): #tests ValueError is thrown if features is not two dimensional
+        self.assertRaises(ValueError, uniCor, y, y, tax)
 
 #test runner
 if __name__ == "__main__":
