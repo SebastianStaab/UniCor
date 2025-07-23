@@ -2,17 +2,17 @@
 """
 Created on Tue Aug 16 08:05:35 2022
 
-@author: JohnDoe
+@author: Sebastian Staab
 """
 
 import pandas as pd
 import numpy as np
+from skbio.stats.composition import clr, closure
 
 
 
 
-
-def helper_bottom_up_propagation(hir, upper, lower, f_acc, target_name):
+def helper_bottom_up_propagation(hir, upper, lower, f_acc, target_name, method, transformation):
     """
     create dictionary of upper hierarchical levels that holds the correlation 
     matrix of all included lower hierarchical level features
@@ -45,7 +45,7 @@ def helper_bottom_up_propagation(hir, upper, lower, f_acc, target_name):
         new_list = np.append(target_name, new_list) #append target variable... for general purpose: change
         new_list = [x for x in new_list if not pd.isnull(x)] #delete NaNs, they won't be propagated to the next level (as there might be problems with NaN subgroups from other groups) but will appear with their lowest defined hierarchical level for the first time!
         
-        Corr = f_acc[new_list].corr() #get correlation
+        Corr = f_acc[new_list].corr(method=method) #get correlation
         final[i] = Corr #save correlation
         
     return final
@@ -83,17 +83,15 @@ def helper_hierarchical_unicor_metric(corr_dict, target_name):
                 
                 n = len(strain)
                 fc_corr = strain.iloc[0] #feature-target correlation
-                ff_corr = (strain.iloc[1:].sum()-1)/(n-1.99) #feature-feature correlation (-own corr and -ED50 corr + 0.01 to prevent zero division)
+                ff_corr = (strain.iloc[1:].sum()-1)/(n-(2-(1e-6))) #feature-feature correlation (-own corr and -ED50 corr + 0.01 to prevent zero division)
                 unicor = (0.5*abs(fc_corr)) - (0.5*ff_corr)
                 
                 
                 if column in strains:
-                    #print("found it")                    
-                    #print(metrics[column])
-                    #print(unicor)
+                    
                     if  metrics[column] > unicor:
                         unicor = metrics[column]            
-                    #print(unicor)
+                    
                 metrics[column], strains[column] = unicor, strain
     return metrics, strains
 
@@ -101,7 +99,7 @@ def helper_hierarchical_unicor_metric(corr_dict, target_name):
 
 
 
-def unicor_metric(features, target):
+def unicor_metric(features, target, method='pearson', transformation=None):
     """
     function that computes the unicor metric for a simple featureset without a hierarchy
 
@@ -130,6 +128,10 @@ def unicor_metric(features, target):
         raise ValueError("ValueError exception thrown. Expected features to have two dimensions")
     if features.shape[0] != target.shape[0]:
         raise ValueError("ValueError exception thrown. Expected features and target to have the same number of samples")
+    if method not in ['pearson', 'spearman']:
+        raise ValueError("Unsupported method. Choose 'pearson' or 'spearman'.")
+    if transformation not in ['clr', 'relative_abundance', None]:
+        raise ValueError("Unsupported transformation. Choose 'clr' or 'relative_abundance'.")
     ###########################################################################
     
     
@@ -141,7 +143,22 @@ def unicor_metric(features, target):
     ### compute unicor metric for all features
     ###########################################################################
     table = target.merge(features, left_index=True, right_index=True) #merge features and target variable
-    cor_matrix = table.corr() #get correlation matrix
+    
+    ### apply transformation (inline here as you wanted)
+    ###########################################################################
+    if transformation is None:
+        transformed_features = table
+    elif transformation == 'relative_abundance':
+            transformed_features = table.div(table.sum(axis=1), axis=0)
+    elif transformation == 'clr':
+            features_pseudo = table + 1e-6
+            clr_data = clr(closure(features_pseudo))
+            transformed_features = pd.DataFrame(clr_data, index=table.index, columns=table.columns)
+    else:
+        raise ValueError(f"Unsupported transformation: {transformation}")
+###########################################################################
+    
+    cor_matrix = transformed_features.corr(method=method) #get correlation matrix
     metric = {} #dictionary to save results to
     
     
@@ -151,7 +168,7 @@ def unicor_metric(features, target):
         else: 
             n = len(cor_matrix[feature])
             fc_corr = cor_matrix[feature].iloc[0] #feature-target correlation
-            ff_corr = (cor_matrix[feature].iloc[1:].sum()-1)/(n-1.99) #feature-feature correlation (-own corr and -target variable corr + 0.01 to prevent zero division)
+            ff_corr = (cor_matrix[feature].iloc[1:].sum()-1)/(n-(2-(1e-6))) #feature-feature correlation (-own corr and -target variable corr + epsilon to prevent zero division)
             unicor = (0.5*abs(fc_corr)) - (0.5*ff_corr) #unicor metric computation
             metric[feature] = unicor #save in dictionary
     ###########################################################################
@@ -160,9 +177,9 @@ def unicor_metric(features, target):
 
 
 
-def uniCor(features, target, hir, threshold = 0.15):
+def unicorp(features, target, hir, threshold=None, top_k=None, method='pearson', transformation=None):
     """
-    UniCor algortihm: Takes in a hierarchical continous dataset and propagates 
+    UniCorP algortihm: Takes in a hierarchical continous dataset and propagates 
     significant features (UniCor metric) to higher hierarchical levels in order 
     to preserve crucial information while significantly reducing the feature set 
     in a biologically meaningfull way
@@ -175,9 +192,14 @@ def uniCor(features, target, hir, threshold = 0.15):
         continuous target variable
     hir : pd.dataframe
         table that contains the  hierarchy
-    threshold : bool, optional
-        UniCor metric threshold. Can only be between 0 and 1. 
-        Optimal values depend on the dataset. The default is 0.15.
+    threshold : float or None
+        UniCor metric threshold. Between 0 and 1.
+    top_k : int or None
+        Number of UNICORNs to detect on each hierarchical level. 
+    method : str
+        'pearson' or 'spearman'
+    transformation : str or None
+        'clr', 'relative_abundance', or None
 
     Raises
     ------
@@ -195,6 +217,21 @@ def uniCor(features, target, hir, threshold = 0.15):
     """
     ### check input
     ###########################################################################
+    if top_k is not None and threshold is not None:
+        raise ValueError("Use either 'threshold' or 'top_k', not both.")
+    if (top_k is None) and (threshold is None):
+        raise ValueError("You must provide either 'threshold' or 'top_k'.")
+    if top_k is None:
+        if not isinstance(threshold, (float, int)):
+            raise TypeError("Expected threshold to be a float or int")
+        if threshold > 1 or threshold < 0:
+            raise ValueError("Threshold must be between 0 and 1")
+    if threshold is None:
+        if not isinstance(top_k, int):
+            raise TypeError("Expected top_k to be an integer")
+        if top_k < 1:
+            raise ValueError("top_k must be >= 1")
+        
     #check type
     if not isinstance(features, (pd.DataFrame)):
         raise TypeError("TypeError exception thrown. Expected pandas dataframe for features")
@@ -202,11 +239,7 @@ def uniCor(features, target, hir, threshold = 0.15):
         raise TypeError("TypeError exception thrown. Expected pandas dataframe for target")
     if not isinstance(hir, (pd.DataFrame)):
         raise TypeError("TypeError exception thrown. Expected pandas dataframe for hir")
-    if not isinstance(threshold, (float, int)):
-        raise TypeError("TypeError exception thrown. Expected float for threshold")
-    #check values    
-    if threshold > 1 or threshold < 0:
-        raise ValueError("ValueError exception thrown. threshold is expected to be a float between 0 and 1")
+     
     #check dimensions
     if features.ndim != 2 or hir.ndim != 2:  
         raise ValueError("ValueError exception thrown. Expected features and hir to have two dimensions")
@@ -214,6 +247,10 @@ def uniCor(features, target, hir, threshold = 0.15):
         raise ValueError("ValueError exception thrown. Expected features and hir to have the same number of features")
     if features.shape[0] != target.shape[0]:
         raise ValueError("ValueError exception thrown. Expected features and target to have the same number of samples")
+    if method not in ['pearson', 'spearman',]:
+        raise ValueError("Unsupported method. Choose 'pearson' or 'spearman'.")
+    if transformation not in ['clr', 'relative_abundance', None]:
+        raise ValueError("Unsupported transformation. Choose 'clr', 'relative_abundance', or None.")
     ###########################################################################
     
     
@@ -265,7 +302,7 @@ def uniCor(features, target, hir, threshold = 0.15):
     ###########################################################################
     
     
-    ### bottom up UniCor propagation
+    ### bottom up UniCor Propagation
     ###########################################################################
     # create dictionarys
     f_dict = {} #for full feature tables per hierarchy level
@@ -279,8 +316,30 @@ def uniCor(features, target, hir, threshold = 0.15):
     # propagation level by level
     for j in range(len(hir_levels)-1): #for every hierarchical level
         i = hir_levels[j] #access specific hierarchy level
-        f_acc = new_features.groupby(i).sum() #accumulate
-        f_acc = f_acc.transpose()
+        f_acc = new_features.groupby(i).sum()#accumulate
+        
+        # Separate numeric feature matrix and target
+        # Only transform numeric feature columns in f_acc
+        X = f_acc.select_dtypes(include=['number'])  # safe, all features
+        
+        non_numeric = f_acc.select_dtypes(exclude=[np.number])  # hierarchy labels (if any)
+        
+        # Apply transformation
+        if transformation is None:
+            X_transformed = X
+        elif transformation == 'relative_abundance':
+            X_transformed = X.div(X.sum(axis=1), axis=0)
+        elif transformation == 'clr':
+            X_pseudo = X + 1e-6
+            
+            clr_data = clr(closure(X_pseudo))
+            X_transformed = pd.DataFrame(clr_data, index=X.index, columns=X.columns)
+        else:
+            raise ValueError(f"Unsupported transformation: {transformation}")
+        
+        # Recombine features and hierarchy columns
+        f_acc = pd.concat([X_transformed, non_numeric], axis=1).transpose()
+        
         f_acc = target.merge(f_acc, left_index=True, right_index=True) #merge with target variable
         f_dict[i] = f_acc #save features in dictionary - might be interesting to see later
         hierarchy = new_features[hir_levels] #get back the hierarchy
@@ -289,18 +348,35 @@ def uniCor(features, target, hir, threshold = 0.15):
         
         # create hierarchy with selected features
         if j <= len(hir_levels)-2: #-1 due to index starting at zero, -1 as we don't need the last computation
-            hg[i] = helper_bottom_up_propagation(hierarchy, hir_levels[j+1], hir_levels[j], f_acc, tv) #get hierarchy groups
+            hg[i] = helper_bottom_up_propagation(hierarchy, hir_levels[j+1], hir_levels[j], f_acc, tv, method=method, transformation=transformation) #get hierarchy groups
             #if nan -> treat as same group and just use next higher hierarchy (no selection/propagation to next level)
             metrics[i], strains[i] = helper_hierarchical_unicor_metric(hg[i], tv) #get metrics for hierarchy groups
         
         # propagate applicable group to next level
-        for q in metrics[i]: #for specific strain metric in metrics
-            strain_metric = metrics[i][q] #assign strain metric to variable
-            if strain_metric > threshold: #check if bigger then defined threshold
-                new_features.loc[new_features[i] == q,hir_levels[j+1]] = q #add relevant strain to next higher level
+        #for q in metrics[i]: #for specific strain metric in metrics
+        #    strain_metric = metrics[i][q] #assign strain metric to variable
+        #    if strain_metric > threshold: #check if bigger then defined threshold
+        #        new_features.loc[new_features[i] == q,hir_levels[j+1]] = q #add relevant strain to next higher level
+        # Get top X features for this level
+        if top_k is not None:
+            n_available = len(metrics[i])
+            k = min(top_k, n_available)
+            top_features = sorted(metrics[i].items(), key=lambda item: item[1], reverse=True)[:k]
+            selected_features = set(f[0] for f in top_features)
+        else:
+            # Threshold-based selection
+            selected_features = {q for q, val in metrics[i].items() if val > threshold}
+
+        # Apply propagation
+        for q in selected_features:
+            new_features.loc[new_features[i] == q, hir_levels[j+1]] = q
+        print(f"Level {i}: Selected {len(selected_features)} features")
+        
+
     ###########################################################################
 
     return new_features #return the adapted features incuding the hierarchical information
+
 
 
 
