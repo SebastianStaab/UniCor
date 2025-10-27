@@ -1,4 +1,4 @@
-UniCor - Hierarchical Feature Selection through Propagation of Uniquely Correlated Entities
+## UniCor - Hierarchical Feature Selection through Propagation of Uniquely Correlated Entities
 
 The accepted manuscript elucidating the UniCor metric and the UniCorP hierachical feature selection algorithm is available as open access here: https://doi.org/10.1093/ismeco/ycaf174 
 
