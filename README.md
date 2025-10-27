@@ -1,4 +1,4 @@
-## UniCor - Hierarchical Feature Selection through Propagation of Uniquely Correlated Entities
+## UniCor and UniCorP: A Novel Metric and Hierarchical Feature Selection Algorithm for Microbial Community Analysis
 
 The accepted manuscript elucidating the UniCor metric and the UniCorP hierachical feature selection algorithm is available as open access here: https://doi.org/10.1093/ismeco/ycaf174 
 
