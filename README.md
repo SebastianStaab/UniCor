@@ -1,5 +1,7 @@
 UniCor - Hierarchical Feature Selection through Propagation of Uniquely Correlated Entities
 
+The accepted manuscript elucidating the UniCor metric and the UniCorP hierachical feature selection algorithm is available as open access here: https://doi.org/10.1093/ismeco/ycaf174 
+
 The idea is to utilize the natural hierarchy in high dimensional, hierarchical datasets (like taxonomic hierarchy in microbiome datasets) in order to make them 
 appropriate for a bigger variety of methods through a reduction of their feature space without the loss of relevant information. 
 
