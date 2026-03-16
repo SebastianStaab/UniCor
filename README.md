@@ -2,7 +2,7 @@
 
 The accepted manuscript elucidating the UniCor metric and the UniCorP hierachical feature selection algorithm is available as open access here: https://doi.org/10.1093/ismeco/ycaf174 
 
-[![DOI](https://zenodo.org/badge/572819630.svg)](https://doi.org/10.5281/zenodo.19050181)
+Code also available at: [![DOI](https://zenodo.org/badge/572819630.svg)](https://doi.org/10.5281/zenodo.19050181)
 
 The idea is to utilize the natural hierarchy in high dimensional, hierarchical datasets (like taxonomic hierarchy in microbiome datasets) in order to make them 
 appropriate for a bigger variety of methods through a reduction of their feature space without the loss of relevant information. 
