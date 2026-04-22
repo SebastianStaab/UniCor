@@ -26,7 +26,7 @@ UniCorP expects three input files:
    A single-column table containing the continuous target variable (e.g., pH, temperature, biomass) for each sample. The index must match the sample IDs in the feature table.
 
 3. **Hierarchy Table** (`hierarchy.csv`)  
-   A feature-by-level matrix describing the biological or functional hierarchy of the features. Each column corresponds to a feature (matching the columns in the feature table), and each row represents a hierarchical level, from broad (e.g., Phylum) to fine-grained (e.g., Genus or ASV).  
+   A feature-by-level matrix describing the biological or functional hierarchy of the features. Each row corresponds to a feature (matching the columns in the feature table), and each column represents a hierarchical level, from broad (e.g., Phylum) to fine-grained (e.g., Genus or ASV).  
    Missing values can be left blank or replaced with the feature ID itself. The order of levels should ideally go from highest (left) to lowest (right), although UniCorP can infer and adjust for reversed hierarchies.
 
 ### Format Summary
@@ -35,7 +35,7 @@ UniCorP expects three input files:
 |------|-------------|-------|---------|-------|
 | `features.csv` | Samples × Features | Sample IDs | Feature IDs | Numeric only |
 | `target.csv`   | Samples × 1         | Sample IDs | Target name | One column |
-| `hierarchy.csv`| Levels × Features  | Levels (e.g. Phylum, Class, ...) | Feature IDs | Categorical |
+| `hierarchy.csv`| Features x Levels | Feature IDs | Levels (e.g. Phylum, Class, ...) | Categorical |
 
 
 ### Hierarchy Requirements
